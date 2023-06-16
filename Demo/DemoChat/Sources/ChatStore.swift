@@ -85,12 +85,50 @@ public final class ChatStore: ObservableObject {
                 return
             }
 
+            let parametersJSON = """
+            {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "The city and state, e.g. San Francisco, CA"
+                    }
+                },
+                "required": ["location"]
+            }
+            """
+
+            let parameters = convertJSONToJSONSchema(parametersJSON)!
+
+            let weatherFunction = ChatFunctionDeclaration(
+                name: "getWeatherData",
+                description: "Get the current weather in a given location",
+                parameters: parameters
+            )
+
+            func convertJSONToJSONSchema(_ jsonString: String) -> JSONSchema? {
+                let jsonData = jsonString.data(using: .utf8)
+                let decoder = JSONDecoder()
+
+                do {
+                    let jsonSchema = try decoder.decode(JSONSchema.self, from: jsonData!)
+                    return jsonSchema
+                } catch {
+                    print("Error decoding JSON: \(error)")
+                    return nil
+                }
+            }
+
+
+            let functions = [weatherFunction]
+            
             let chatsStream: AsyncThrowingStream<ChatStreamResult, Error> = openAIClient.chatsStream(
                 query: ChatQuery(
                     model: model,
                     messages: conversation.messages.map { message in
                         Chat(role: message.role, content: message.content)
-                    }
+                    },
+                    functions: functions
                 )
             )
 
@@ -103,6 +141,12 @@ public final class ChatStore: ObservableObject {
                         content: choice.delta.content ?? "",
                         createdAt: Date(timeIntervalSince1970: TimeInterval(partialChatResult.created))
                     )
+                    print("choice: \(choice.delta.content.debugDescription)")
+                    print("finishReason: \(String(describing: choice.finishReason))")
+                    if let reason = choice.finishReason, reason == "function_call" {
+                        print("function content: \(choice.delta.content)")
+                        print("got it")
+                    }
                     if let existingMessageIndex = existingMessages.firstIndex(where: { $0.id == partialChatResult.id }) {
                         // Meld into previous message
                         let previousMessage = existingMessages[existingMessageIndex]
